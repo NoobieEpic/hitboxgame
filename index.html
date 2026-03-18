@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Accurate Hitbox Survival</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Arial', sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
+        canvas { display: block; }
+
+        /* The Menu Overlay */
+        #menu {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: flex; flex-direction: column; justify-content: center;
+            align-items: center; z-index: 999; color: white;
+        }
+
+        #startBtn {
+            padding: 20px 60px; font-size: 30px; cursor: pointer;
+            background: #ff4400; color: white; border: 4px solid white; 
+            font-weight: bold; border-radius: 10px;
+        }
+
+        /* Thumbstick */
+        #joystick-ui {
+            position: fixed; bottom: 50px; left: 50px;
+            width: 140px; height: 140px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(0, 255, 255, 0.5);
+            border-radius: 50%; z-index: 500;
+            display: flex; justify-content: center; align-items: center;
+        }
+        #knob {
+            width: 60px; height: 60px;
+            background: #00ffff; border-radius: 50%;
+            pointer-events: none;
+        }
+
+        #score {
+            position: fixed; top: 20px; left: 20px;
+            color: #00ffff; font-size: 22px; z-index: 100; font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="score">Survival: 0s</div>
+
+    <div id="menu">
+        <h1 style="color: #00ffff; font-size: 40px;">ACCURATE HITBOX</h1>
+        <button id="startBtn">START GAME</button>
+    </div>
+
+    <div id="joystick-ui">
+        <div id="knob"></div>
+    </div>
+
+    <!-- The "Old System" Audio Tag -->
+    <audio id="catchAudio">
+        <source src="catch.mp3" type="audio/mpeg">
+        <source src="catch.mp4" type="audio/mp4">
+    </audio>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const menu = document.getElementById('menu');
+        const startBtn = document.getElementById('startBtn');
+        const joystick = document.getElementById('joystick-ui');
+        const knob = document.getElementById('knob');
+        const catchAudio = document.getElementById('catchAudio');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let gameActive = false;
+        let score = 0;
+        let startTime = 0;
+
+        const player = { x: 0, y: 0, size: 30, speed: 7, vx: 0, vy: 0 };
+        const enemy = { x: 500, y: 500, w: 180, h: 140, speed: 4 };
+        
+        const enemyImg = new Image();
+        enemyImg.src = 'monster.png';
+
+        const keys = {};
+        window.onkeydown = (e) => keys[e.code] = true;
+        window.onkeyup = (e) => keys[e.code] = false;
+
+        // Joystick Input Logic
+        let activeTouch = false;
+        function updateJoy(e) {
+            if (!activeTouch) return;
+            const touch = e.touches ? e.touches[0] : e;
+            const rect = joystick.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            const dx = touch.clientX - cx;
+            const dy = touch.clientY - cy;
+            const dist = Math.hypot(dx, dy);
+            const angle = Math.atan2(dy, dx);
+            const limit = 50;
+            const d = Math.min(dist, limit);
+            const mx = Math.cos(angle) * d;
+            const my = Math.sin(angle) * d;
+
+            knob.style.transform = `translate(${mx}px, ${my}px)`;
+            player.vx = (mx / limit) * player.speed;
+            player.vy = (my / limit) * player.speed;
+        }
+
+        joystick.onmousedown = joystick.ontouchstart = (e) => { activeTouch = true; updateJoy(e); };
+        window.onmousemove = window.ontouchmove = (e) => updateJoy(e);
+        window.onmouseup = window.ontouchend = () => { 
+            activeTouch = false; player.vx = 0; player.vy = 0; 
+            knob.style.transform = `translate(0px, 0px)`; 
+        };
+
+        function startGame() {
+            // Unlocking the Audio (Required by browsers)
+            catchAudio.play().then(() => {
+                catchAudio.pause();
+                catchAudio.currentTime = 0;
+            }).catch(() => {});
+
+            menu.style.display = 'none';
+            gameActive = true;
+            startTime = Date.now();
+            player.x = 0; player.y = 0;
+            enemy.x = 800; enemy.y = 800;
+            enemy.speed = 4;
+            loop();
+        }
+
+        function loop() {
+            if (!gameActive) return;
+
+            // Keyboard Movement (only if not using joystick)
+            if (!activeTouch) {
+                player.vx = 0; player.vy = 0;
+                if (keys['KeyW'] || keys['ArrowUp']) player.vy = -player.speed;
+                if (keys['KeyS'] || keys['ArrowDown']) player.vy = player.speed;
+                if (keys['KeyA'] || keys['ArrowLeft']) player.vx = -player.speed;
+                if (keys['KeyD'] || keys['ArrowRight']) player.vx = player.speed;
+            }
+
+            player.x += player.vx;
+            player.y += player.vy;
+
+            // Enemy Follow
+            const angle = Math.atan2(player.y - (enemy.y + enemy.h/2), player.x - (enemy.x + enemy.w/2));
+            enemy.x += Math.cos(angle) * enemy.speed;
+            enemy.y += Math.sin(angle) * enemy.speed;
+            enemy.speed += 0.002;
+
+            // Collision Check
+            if (player.x + 15 > enemy.x + 25 && player.x - 15 < enemy.x + enemy.w - 25 &&
+                player.y + 15 > enemy.y + 25 && player.y - 15 < enemy.y + enemy.h - 25) {
+                gameOver();
+                return;
+            }
+
+            // Draw Background
+            ctx.fillStyle = "#111";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // CAMERA FOLLOW
+            ctx.save();
+            ctx.translate(canvas.width/2 - player.x, canvas.height/2 - player.y);
+
+            // World Grid
+            ctx.strokeStyle = "#222";
+            for(let i = -2000; i <= 2000; i+=100) {
+                ctx.beginPath(); ctx.moveTo(i, -2000); ctx.lineTo(i, 2000); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(-2000, i); ctx.lineTo(2000, i); ctx.stroke();
+            }
+
+            // Draw Character Image
+            if (enemyImg.complete) ctx.drawImage(enemyImg, enemy.x, enemy.y, enemy.w, enemy.h);
+
+            // Draw Player
+            ctx.fillStyle = "#00ffff";
+            ctx.fillRect(player.x - 15, player.y - 15, 30, 30);
+
+            ctx.restore();
+
+            document.getElementById('score').innerText = `Survival: ${Math.floor((Date.now() - startTime) / 1000)}s`;
+            requestAnimationFrame(loop);
+        }
+
+        function gameOver() {
+            gameActive = false;
+            catchAudio.play(); // Play "Old System" Audio
+            menu.style.display = 'flex';
+            document.getElementById('startBtn').innerText = "RETRY";
+        }
+
+        startBtn.onclick = startGame;
+        window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+    </script>
+</body>
+</html>
